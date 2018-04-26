@@ -2,7 +2,8 @@ package observer
 
 import (
 	"testing"
-
+	
+	"github.com/reactivex/rxgo/rx"
 	"github.com/reactivex/rxgo/handlers"
 	"github.com/stretchr/testify/assert"
 )
@@ -11,7 +12,7 @@ func TestCreateNewObserverWithConstructor(t *testing.T) {
 	assert := assert.New(t)
 	ob := New()
 
-	assert.Implements((*Observer)(nil), ob)
+	assert.Implements((*rx.Observer)(nil), ob)
 	assert.NotNil(ob.OnNext)
 	assert.NotNil(ob.OnError)
 	assert.NotNil(ob.OnDone)
@@ -102,7 +103,7 @@ func TestChangesOnDoneIntoObserver(t *testing.T) {
 func TestCustomObserverIsAbleToObserveSequence(t *testing.T) {
 	// given custom observer implementing Observer interface
 	type customObserver struct {
-		Observer
+		rx.Observer
 	}
 	// and sequence observer created backed by custom observer
 	sequenceObserver := customObserver{}

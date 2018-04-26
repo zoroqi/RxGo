@@ -2,23 +2,15 @@ package observer
 
 import (
 	"github.com/reactivex/rxgo/handlers"
+	"github.com/reactivex/rxgo/rx"
 )
-
 
 // Observer represents a group of EventHandlers.
-type (
-	Observer interface {
-		OnNext(interface{})
-		OnError(error)
-		OnDone()
-	}
-
-	wrappingObserver struct {
-		onNextHandler handlers.NextFunc
-		onErrorHandler handlers.ErrFunc
-		onDoneHandler handlers.DoneFunc
-	}
-)
+type wrappingObserver struct {
+	onNextHandler handlers.NextFunc
+	onErrorHandler handlers.ErrFunc
+	onDoneHandler handlers.DoneFunc
+}
 
 func (o wrappingObserver) OnNext(item interface{}) {
 	o.onNextHandler(item)
@@ -33,7 +25,7 @@ func (o wrappingObserver) OnDone() {
 
 // New constructs a new Observer instance with default Observer and accept
 // any number of EventHandler
-func New(eventHandlers ...interface{}) Observer {
+func New(eventHandlers ...interface{}) rx.Observer {
 	ob := wrappingObserver{
 		onNextHandler: func(item interface{}) {},
 		onErrorHandler: func(err error) {},
@@ -48,7 +40,7 @@ func New(eventHandlers ...interface{}) Observer {
 				ob.onErrorHandler = customFunc
 			} else if customFunc, ok := handlers.AsDoneFunc(handler); ok {
 				ob.onDoneHandler = customFunc
-			} else if customObserver, ok := handler.(Observer); ok {
+			} else if customObserver, ok := handler.(rx.Observer); ok {
 				return customObserver
 			}
 		}
