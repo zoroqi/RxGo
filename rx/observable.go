@@ -2,11 +2,11 @@ package rx
 
 import (
 	"context"
-	"time"
 )
 
+// Observable is an Iterator, Functor, and can Subscribe a handler.
 type Observable interface {
 	Iterator
 	Functor
-	Subscribe(interface{}, ...time.Duration) context.Context
+	Subscribe(interface{}) context.Context
 }

@@ -50,24 +50,31 @@ func TestEmptyOperator(t *testing.T) {
 }
 
 func TestIntervalOperator(t *testing.T) {
-	fin := make(chan struct{})
-	myStream := Interval(fin, 10*time.Millisecond)
+	// fin := make(chan struct{})
+	// myStream := Interval(fin, 10*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
+	stream := Interval(ctx, 10*time.Millisecond)
 	nums := []int{}
 
 	onNext := handlers.NextFunc(func(item interface{}) {
 		if num, ok := item.(int); ok {
-			if num >= 5 {
-				fin <- struct{}{}
-				close(fin)
+			if num >= 10 {
+				// fin <- struct{}{}
+				cancel()
+				// close(fin)
 			}
 			nums = append(nums, num)
 		}
 	})
 
-	ctx := myStream.Subscribe(onNext)
+	ctx = stream.Subscribe(onNext)
 	<-ctx.Done()
 
-	assert.Exactly(t, []int{0, 1, 2, 3, 4, 5}, nums)
+	var expected []int
+	for i := 0; i <= 10; i++ {
+		expected = append(expected, i)
+	}
+	assert.Exactly(t, expected, nums)
 }
 
 func TestRangeOperator(t *testing.T) {
@@ -731,14 +738,25 @@ func TestMergeOperator(t *testing.T) {
 }
 
 func TestCombineLatestOperator(t *testing.T) {
-	src1 := Interval(make(chan struct{}), 25*time.Millisecond).Take(3)
-	src2 := Interval(make(chan struct{}), 30*time.Millisecond).Take(3).Map(func(in interface{}) interface{} {
+	// src1 := Interval(make(chan struct{}), 25*time.Millisecond).Take(3)
+	// src2 := Interval(make(chan struct{}), 30*time.Millisecond).Take(3).Map(func(in interface{}) interface{} {
+	// 	return in.(int) * 10
+	// })
+	// src3 := Interval(make(chan struct{}), 35*time.Millisecond).Take(3).Map(func(in interface{}) interface{} {
+	// 	return in.(int) * 100
+	// })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	src1 := Interval(ctx, 25*time.Millisecond).Take(3)
+	src2 := Interval(ctx, 30*time.Millisecond).Take(3).Map(func(in interface{}) interface{} {
 		return in.(int) * 10
 	})
-	src3 := Interval(make(chan struct{}), 35*time.Millisecond).Take(3).Map(func(in interface{}) interface{} {
+	src3 := Interval(ctx, 35*time.Millisecond).Take(3).Map(func(in interface{}) interface{} {
 		return in.(int) * 100
 	})
 
+	// Because Map is a Functor's method and return rx.Observable type, not an Observable
 	stream2 := src2.(Observable)
 	stream3 := src3.(Observable)
 
@@ -757,12 +775,9 @@ func TestCombineLatestOperator(t *testing.T) {
 		}
 	})
 
-	ctx := streamCombineLatest.Subscribe(onNext)
+	ctx = streamCombineLatest.Subscribe(onNext)
 	<-ctx.Done()
 
-	excepted := []int{
-		0, 1, 11, 111, 112, 122, 222,
-	}
-
+	excepted := []int{0, 1, 11, 111, 112, 122, 222}
 	assert.Exactly(t, excepted, nums)
 }

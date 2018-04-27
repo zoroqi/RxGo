@@ -34,19 +34,8 @@ func (o Observable) Next() (interface{}, error) {
 	return nil, errors.New(errors.EndOfIteratorError)
 }
 
-// Subscribe subscribes an EventHandler and returns a Subscription channel.
-func (o Observable) Subscribe(handler interface{}, timeout ...time.Duration) context.Context {
-	var cancel context.CancelFunc
-	ctx := context.Background()
-
-	if len(timeout) > 0 {
-		ctx, cancel = context.WithTimeout(ctx, timeout[len(timeout)-1])
-	} else {
-		ctx, cancel = context.WithCancel(ctx)
-	}
-
+func subscribe(ctx context.Context, cancel context.CancelFunc, handler interface{}, o Observable) context.Context {
 	ob := observer.New(handler)
-
 	go func() {
 		for item := range o {
 			select {
@@ -66,6 +55,26 @@ func (o Observable) Subscribe(handler interface{}, timeout ...time.Duration) con
 		cancel()
 	}()
 	return ctx
+}
+
+// Subscribe subscribes an EventHandler and returns a Subscription channel.
+func (o Observable) Subscribe(handler interface{}) context.Context {
+	ctx, cancel := context.WithCancel(context.Background())
+	return subscribe(ctx, cancel, handler, o)
+}
+
+// SubscribeFor is a shortcut for Subscribe with time.Duration provided as timeout. It creates
+// a context.Context  with context.WithTimeout. See https://golang.org/pkg/context/#WithTimeout.
+func (o Observable) SubscribeFor(handler interface{}, timeout time.Duration) context.Context {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	return subscribe(ctx, cancel, handler, o)
+}
+
+// SubscribeUntil takes a deadlinea and create a context.Context with context.WithDeadline
+// see https://golang.org/pkg/context/#WithDeadline.
+func (o Observable) SubscribeUntil(handler interface{}, deadline time.Time) context.Context {
+	ctx, cancel := context.WithDeadline(context.Background(), deadline)
+	return subscribe(ctx, cancel, handler, o)
 }
 
 // Map returns a mapping of each item on the source Observable as a new rx.Observable.
@@ -244,14 +253,29 @@ func Empty() Observable {
 
 // Interval creates an Observable emitting incremental integers infinitely between
 // each given time interval.
-func Interval(term chan struct{}, interval time.Duration) Observable {
+// func Interval(term chan struct{}, interval time.Duration) Observable {
+func Interval(ctx context.Context, interval time.Duration) Observable {
 	source := make(chan interface{})
-	go func(term chan struct{}) {
+	// go func(term chan struct{}) {
+	// 	i := 0
+	// OuterLoop:
+	// 	for {
+	// 		select {
+	// 		case <-term:
+	// 			break OuterLoop
+	// 		case <-time.After(interval):
+	// 			source <- i
+	// 		}
+	// 		i++
+	// 	}
+	// 	close(source)
+	// }(term)
+	go func() {
 		i := 0
 	OuterLoop:
 		for {
 			select {
-			case <-term:
+			case <-ctx.Done():
 				break OuterLoop
 			case <-time.After(interval):
 				source <- i
@@ -259,7 +283,7 @@ func Interval(term chan struct{}, interval time.Duration) Observable {
 			i++
 		}
 		close(source)
-	}(term)
+	}()
 	return Observable(source)
 }
 
@@ -326,7 +350,7 @@ func Start(f EmitFunc, fs ...EmitFunc) Observable {
 	return Observable(source)
 }
 
-// Combine multiple Observables into one by merging their emissions.
+// Merge combines multiple Observables into one by merging their emissions.
 func Merge(o1 rx.Observable, o2 rx.Observable, on ...rx.Observable) Observable {
 	out := make(chan interface{})
 	go func() {
