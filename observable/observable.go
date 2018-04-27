@@ -1,25 +1,27 @@
 package observable
 
 import (
+	"context"
 	"reflect"
 	"sync"
 	"time"
 
-	"github.com/reactivex/rxgo"
 	"github.com/reactivex/rxgo/errors"
-	"github.com/reactivex/rxgo/fx"
 	"github.com/reactivex/rxgo/observer"
-	"github.com/reactivex/rxgo/subscription"
+	"github.com/reactivex/rxgo/rx"
 )
 
 // Observable is a basic observable channel
 type Observable <-chan interface{}
 
-var DefaultObservable = make(Observable)
+var (
+	// DefaultObservable is a zero buffer observable
+	// channel equivalent to New(0).
+	DefaultObservable = make(Observable)
+	none              = new(uint)
+)
 
-var none = new(uint)
-
-// New creates an Observable
+// New creates an Observable with the
 func New(buffer uint) Observable {
 	return make(Observable, int(buffer))
 }
@@ -33,49 +35,41 @@ func (o Observable) Next() (interface{}, error) {
 }
 
 // Subscribe subscribes an EventHandler and returns a Subscription channel.
-func (o Observable) Subscribe(handler interface{}) <-chan subscription.Subscription {
-	done := make(chan subscription.Subscription)
-	sub := subscription.New().Subscribe()
+func (o Observable) Subscribe(handler interface{}, timeout ...time.Duration) context.Context {
+	var cancel context.CancelFunc
+	ctx := context.Background()
+
+	if len(timeout) > 0 {
+		ctx, cancel = context.WithTimeout(ctx, timeout[len(timeout)-1])
+	} else {
+		ctx, cancel = context.WithCancel(ctx)
+	}
 
 	ob := observer.New(handler)
 
 	go func() {
-	OuterLoop:
 		for item := range o {
-			switch item := item.(type) {
-			case error:
-				ob.OnError(item)
-
-				// Record the error and break the loop.
-				sub.Error = item
-				break OuterLoop
+			select {
+			case <-ctx.Done():
+				return
 			default:
-				ob.OnNext(item)
+				switch item := item.(type) {
+				case error:
+					ob.OnError(item)
+					cancel()
+				default:
+					ob.OnNext(item)
+				}
 			}
 		}
-
-		// OnDone only gets executed if there's no error.
-		if sub.Error == nil {
-			ob.OnDone()
-		}
-
-		done <- sub.Unsubscribe()
-		return
+		ob.OnDone()
+		cancel()
 	}()
-
-	return done
+	return ctx
 }
 
-/*
-func (o Observable) Unsubscribe() subscription.Subscription {
-	// Stub: to be implemented
-	return subscription.New()
-}
-*/
-
-// Map maps a MappableFunc predicate to each item in Observable and
-// returns a new Observable with applied items.
-func (o Observable) Map(apply fx.MappableFunc) Observable {
+// Map returns a mapping of each item on the source Observable as a new rx.Observable.
+func (o Observable) Map(apply rx.MapFunc) rx.Observable {
 	out := make(chan interface{})
 	go func() {
 		for item := range o {
@@ -86,15 +80,15 @@ func (o Observable) Map(apply fx.MappableFunc) Observable {
 	return Observable(out)
 }
 
-// Take takes first n items in the original Obserable and returns
-// a new Observable with the taken items.
-func (o Observable) Take(nth uint) Observable {
+// Take retrieves the first n items on the source
+// Observable and emits them on a new returning Observable.
+func (o Observable) Take(n uint) Observable {
 	out := make(chan interface{})
 	go func() {
 		takeCount := 0
 		for item := range o {
-			if takeCount < int(nth) {
-				takeCount += 1
+			if takeCount < int(n) {
+				takeCount++
 				out <- item
 				continue
 			}
@@ -105,14 +99,14 @@ func (o Observable) Take(nth uint) Observable {
 	return Observable(out)
 }
 
-// TakeLast takes last n items in the original Observable and returns
-// a new Observable with the taken items.
-func (o Observable) TakeLast(nth uint) Observable {
+// TakeLast retrieves the last n items on the source Observable
+// and emit them on a new returning Observable.
+func (o Observable) TakeLast(n uint) Observable {
 	out := make(chan interface{})
 	go func() {
-		buf := make([]interface{}, nth)
+		buf := make([]interface{}, n)
 		for item := range o {
-			if len(buf) >= int(nth) {
+			if len(buf) >= int(n) {
 				buf = buf[1:]
 			}
 			buf = append(buf, item)
@@ -125,9 +119,9 @@ func (o Observable) TakeLast(nth uint) Observable {
 	return Observable(out)
 }
 
-// Filter filters items in the original Observable and returns
+// Filter filters items on the source Observable and returns
 // a new Observable with the filtered items.
-func (o Observable) Filter(apply fx.FilterableFunc) Observable {
+func (o Observable) Filter(apply rx.FilterFunc) rx.Observable {
 	out := make(chan interface{})
 	go func() {
 		for item := range o {
@@ -140,7 +134,8 @@ func (o Observable) Filter(apply fx.FilterableFunc) Observable {
 	return Observable(out)
 }
 
-// First returns new Observable which emit only first item.
+// First retrieves the first item on the source Observable
+// and emits it on the new returning Observable.
 func (o Observable) First() Observable {
 	out := make(chan interface{})
 	go func() {
@@ -153,7 +148,8 @@ func (o Observable) First() Observable {
 	return Observable(out)
 }
 
-// Last returns a new Observable which emit only last item.
+// Last retrieves the last item on the source Observable
+// and emits it on the new returning Observable.
 func (o Observable) Last() Observable {
 	out := make(chan interface{})
 	go func() {
@@ -167,9 +163,9 @@ func (o Observable) Last() Observable {
 	return Observable(out)
 }
 
-//Distinct supress duplicate items in the original Observable and returns
-// a new Observable.
-func (o Observable) Distinct(apply fx.KeySelectorFunc) Observable {
+// Distinct merges duplicate items on the original Observable and
+// only emits distinct items on a new returning Observable.
+func (o Observable) Distinct(apply KeySelectFunc) Observable {
 	out := make(chan interface{})
 	go func() {
 		keysets := make(map[interface{}]struct{})
@@ -186,7 +182,9 @@ func (o Observable) Distinct(apply fx.KeySelectorFunc) Observable {
 	return Observable(out)
 }
 
-func (o Observable) DistinctUntilChanged(apply fx.KeySelectorFunc) Observable {
+// DistinctUntilChanged suppresses the subsequent duplicates on the
+// source Observable and only emits distinct items on a new returning Observable.
+func (o Observable) DistinctUntilChanged(apply KeySelectFunc) Observable {
 	out := make(chan interface{})
 	go func() {
 		var current interface{}
@@ -202,11 +200,11 @@ func (o Observable) DistinctUntilChanged(apply fx.KeySelectorFunc) Observable {
 	return Observable(out)
 }
 
-// Scan applies ScannableFunc predicate to each item in the original
-// Observable sequentially and emits each successive value on a new Observable.
-func (o Observable) Scan(apply fx.ScannableFunc) Observable {
+// Scan applies rx.ScanFunc to each item in the original Observable sequentially
+// and emits each successive value (accumulator) on a new returning Observable.
+// It is similar to fold left without an initial value.
+func (o Observable) Scan(apply rx.ScanFunc) rx.Observable {
 	out := make(chan interface{})
-
 	go func() {
 		var current interface{}
 		for item := range o {
@@ -218,7 +216,8 @@ func (o Observable) Scan(apply fx.ScannableFunc) Observable {
 	return Observable(out)
 }
 
-// From creates a new Observable from an Iterator.
+// From creates a new Observable from an Iterator, which can be created
+// from any sequence of items such as slice and array.
 func From(it rx.Iterator) Observable {
 	source := make(chan interface{})
 	go func() {
@@ -278,7 +277,7 @@ func Range(start, end int) Observable {
 	return Observable(source)
 }
 
-// Just creates an Observable with the provided item(s).
+// Just creates an Observable with the provided item(s) as-is.
 func Just(item interface{}, items ...interface{}) Observable {
 	source := make(chan interface{})
 	if len(items) > 0 {
@@ -297,13 +296,14 @@ func Just(item interface{}, items ...interface{}) Observable {
 	return Observable(source)
 }
 
-// Start creates an Observable from one or more directive-like EmittableFunc
-// and emits the result of each operation asynchronously on a new Observable.
-func Start(f fx.EmittableFunc, fs ...fx.EmittableFunc) Observable {
+// Start creates an Observable from one or more directive EmitFunc
+// and emits the result of each operation asynchronously on a new
+// returning Observable.
+func Start(f EmitFunc, fs ...EmitFunc) Observable {
 	if len(fs) > 0 {
-		fs = append([]fx.EmittableFunc{f}, fs...)
+		fs = append([]EmitFunc{f}, fs...)
 	} else {
-		fs = []fx.EmittableFunc{f}
+		fs = []EmitFunc{f}
 	}
 
 	source := make(chan interface{})
@@ -311,7 +311,7 @@ func Start(f fx.EmittableFunc, fs ...fx.EmittableFunc) Observable {
 	var wg sync.WaitGroup
 	for _, f := range fs {
 		wg.Add(1)
-		go func(f fx.EmittableFunc) {
+		go func(f EmitFunc) {
 			source <- f()
 			wg.Done()
 		}(f)
@@ -326,11 +326,11 @@ func Start(f fx.EmittableFunc, fs ...fx.EmittableFunc) Observable {
 	return Observable(source)
 }
 
-// Combine multiple Observables into one by merging their emissions
-func Merge(o1 Observable, o2 Observable, on ...Observable) Observable {
+// Combine multiple Observables into one by merging their emissions.
+func Merge(o1 rx.Observable, o2 rx.Observable, on ...rx.Observable) Observable {
 	out := make(chan interface{})
 	go func() {
-		chans := append([]Observable{o1, o2}, on...)
+		chans := append([]rx.Observable{o1, o2}, on...)
 		count := len(chans)
 		cases := make([]reflect.SelectCase, count)
 		for i := range cases {
@@ -352,7 +352,7 @@ func Merge(o1 Observable, o2 Observable, on ...Observable) Observable {
 }
 
 // CombineLatest emits an item whenever any of the source Observables emits an item
-func CombineLatest(o []Observable, apply fx.CombinableFunc) Observable {
+func CombineLatest(o []Observable, apply CombineFunc) Observable {
 	out := make(chan interface{})
 	go func() {
 		chans := o

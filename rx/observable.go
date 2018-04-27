@@ -1,9 +1,12 @@
 package rx
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 type Observable interface {
 	Iterator
 	Functor
-	Subscribe(interface{}) (context.Context, context.CancelFunc)
+	Subscribe(interface{}, ...time.Duration) context.Context
 }
