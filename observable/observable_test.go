@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/reactivex/rxgo/fx"
 	"github.com/reactivex/rxgo/handlers"
 	"github.com/reactivex/rxgo/iterable"
 	"github.com/reactivex/rxgo/observer"
@@ -156,7 +157,7 @@ func TestStartOperator(t *testing.T) {
 	responseCodes := []int{}
 	done := false
 
-	d1 := EmitFunc(func() interface{} {
+	d1 := fx.EmitFunc(func() interface{} {
 		result := &http.Response{
 			Status:     "200 OK",
 			StatusCode: 200,
@@ -169,7 +170,7 @@ func TestStartOperator(t *testing.T) {
 		return res
 	})
 
-	d2 := EmitFunc(func() interface{} {
+	d2 := fx.EmitFunc(func() interface{} {
 		result := &http.Response{
 			Status:     "301 Moved Permanently",
 			StatusCode: 301,
@@ -182,7 +183,7 @@ func TestStartOperator(t *testing.T) {
 		return res
 	})
 
-	d3 := EmitFunc(func() interface{} {
+	d3 := fx.EmitFunc(func() interface{} {
 		result := &http.Response{
 			Status:     "500 Server Error",
 			StatusCode: 500,
@@ -195,7 +196,7 @@ func TestStartOperator(t *testing.T) {
 		return res
 	})
 
-	e1 := EmitFunc(func() interface{} {
+	e1 := fx.EmitFunc(func() interface{} {
 		err := errors.New("Bad URL")
 		res, err := fakeGet("badurl.err", 100*time.Millisecond, err)
 		if err != nil {
@@ -204,7 +205,7 @@ func TestStartOperator(t *testing.T) {
 		return res
 	})
 
-	d4 := EmitFunc(func() interface{} {
+	d4 := fx.EmitFunc(func() interface{} {
 		result := &http.Response{
 			Status:     "404 Not Found",
 			StatusCode: 400,

@@ -5,10 +5,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/reactivex/rxgo/fx"
 	"github.com/reactivex/rxgo/handlers"
 	"github.com/reactivex/rxgo/iterable"
+	"github.com/reactivex/rxgo/observable"
 	"github.com/reactivex/rxgo/observer"
+	"github.com/reactivex/rxgo/rx"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -21,11 +22,12 @@ func TestCreateConnectableWithConstructor(t *testing.T) {
 	co3 := Just("world")
 
 	cotests := []struct {
-		expect, suspect int
+		expect  int
+		suspect observable.Observable
 	}{
-		{0, cap(co1.Observable)},
-		{3, cap(co2.Observable)},
-		{0, cap(co3.Observable)},
+		{0, co1.Observable},
+		{3, co2.Observable},
+		{0, co3.Observable},
 	}
 
 	if assert.IsType(Connectable{}, co1) &&
@@ -33,14 +35,14 @@ func TestCreateConnectableWithConstructor(t *testing.T) {
 		assert.IsType(Connectable{}, co3) {
 
 		for _, tt := range cotests {
-			assert.Equal(tt.suspect, tt.expect)
+			assert.Equal(cap(tt.suspect), tt.expect)
+			assert.Implements((*rx.Observable)(nil), tt.suspect)
 		}
 	}
 
 	ob := observer.New(handlers.NextFunc(func(item interface{}) {
 		text += item.(string)
-	}),
-	)
+	}))
 
 	co4 := New(0, ob)
 	assert.Equal(0, cap(co4.Observable))
@@ -58,8 +60,10 @@ func TestDoOperator(t *testing.T) {
 	}
 
 	co = co.Do(nextf)
-	sub := co.Connect()
-	<-sub
+	// sub := co.Connect()
+	// <-sub
+	ctx := co.Connect()
+	<-ctx.Done()
 
 	assert.Equal(t, 6, num)
 }
@@ -73,8 +77,10 @@ func TestSubscribeToNextFunc(t *testing.T) {
 	})
 
 	co = co.Subscribe(onNext)
-	sub := co.Connect()
-	<-sub
+	// sub := co.Connect()
+	// <-sub
+	ctx := co.Connect()
+	<-ctx.Done()
 
 	assert.Equal(t, 6, num)
 }
@@ -89,8 +95,10 @@ func TestSubscribeToErrFunc(t *testing.T) {
 	})
 
 	co = co.Subscribe(onError)
-	sub := co.Connect()
-	<-sub
+	// sub := co.Connect()
+	// <-sub
+	ctx := co.Connect()
+	<-ctx.Done()
 
 	if assert.NotNil(t, myError) {
 		assert.Equal(t, "bang", myError.Error())
@@ -106,8 +114,8 @@ func TestSubscribeToDoneFunc(t *testing.T) {
 		text += "done"
 	})
 
-	sub := co.Subscribe(onDone).Connect()
-	<-sub
+	ctx := co.Subscribe(onDone).Connect()
+	<-ctx.Done()
 
 	if assert.NotEmpty(t, text) {
 		assert.Equal(t, "done", text)
@@ -130,27 +138,22 @@ func TestSubscribeToObserver(t *testing.T) {
 	}
 	co := From(it)
 
-	onNext := handlers.NextFunc(func(item interface{}) {
+	onNext := func(item interface{}) {
 		num += item.(int)
-	})
+	}
 
-	onError := handlers.ErrFunc(func(err error) {
+	onError := func(err error) {
 		myErr = err
-	})
+	}
 
-	onDone := handlers.DoneFunc(func() {
+	onDone := func() {
 		done = "done"
-	})
+	}
 
 	ob := observer.New(onError, onDone, onNext)
 
-	sub := co.Subscribe(ob).Connect()
-
-	for c := range sub {
-		for s := range c {
-			assert.Equal("bang", s.Error.Error())
-		}
-	}
+	ctx := co.Subscribe(ob).Connect()
+	<-ctx.Done()
 
 	assert.Equal(6, num)
 	assert.Equal("bang", myErr.Error())
@@ -203,24 +206,31 @@ func TestSubscribeToManyObservers(t *testing.T) {
 		nums = append(nums, item.(int)*10)
 	})
 
-	co = co.Subscribe(ob1).Subscribe(ob3).Subscribe(ob2)
-	subs := co.Connect()
+	ctx := co.Subscribe(ob1).Subscribe(ob3).Subscribe(ob2).Connect()
+	<-ctx.Done()
 
-	for sub := range subs {
-		for s := range sub {
-			assert.Equal("bang", s.Error.Error())
-		}
+	assert.Len(nums, 9, "Each subscription should process up to three items before hitting an error")
+	ee := errors.New("bang")
+	assert.Exactly([]error{ee, ee}, errs, "Two errors should be collected for ob1 and ob2")
+	assert.Empty(dones, "ob1, ob2, ob3 should never call OnDone")
+
+	it, err = iterable.New([]interface{}{1, 2, 3, 4, 5, 6, 7, 8, 9})
+	if err != nil {
+		t.Fail()
 	}
 
-	expectedNums := []int{2, 4, 6, 1, 10, 2, 3, 20, 30}
-	for _, num := range expectedNums {
-		assert.Contains(nums, num)
-	}
+	nums = []int{}
+	errs = []error{}
+	dones = []string{}
 
-	expectedErr := errors.New("bang")
-	assert.Exactly([]error{expectedErr, expectedErr}, errs)
+	co = From(it)
+	ctx = co.Subscribe(ob1).Subscribe(ob3).Subscribe(ob2).Connect()
+	<-ctx.Done()
 
-	assert.Empty(dones)
+	assert.Len(nums, 27)
+	assert.Len(dones, 2)
+	assert.Empty(errs)
+
 }
 
 func TestConnectableMap(t *testing.T) {
@@ -232,7 +242,7 @@ func TestConnectableMap(t *testing.T) {
 
 	stream := From(it)
 
-	multiplyAllIntBy := func(factor interface{}) fx.MappableFunc {
+	multiplyAllIntBy := func(factor interface{}) rx.MapFunc {
 		return func(item interface{}) interface{} {
 			if num, ok := item.(int); ok {
 				return num * factor.(int)
@@ -249,8 +259,10 @@ func TestConnectableMap(t *testing.T) {
 		}
 	})
 
-	subs := stream.Subscribe(onNext).Connect()
-	<-subs
+	// subs := stream.Subscribe(onNext).Connect()
+	// <-subs
+	ctx := stream.Subscribe(onNext).Connect()
+	<-ctx.Done()
 
 	assert.Exactly(t, []int{10, 20, 30}, nums)
 }
@@ -264,7 +276,7 @@ func TestConnectableFilter(t *testing.T) {
 
 	stream := From(it)
 
-	lt := func(target interface{}) fx.FilterableFunc {
+	lt := func(target interface{}) rx.FilterFunc {
 		return func(item interface{}) bool {
 			if num, ok := item.(int); ok {
 				if num < 9 {
@@ -284,8 +296,10 @@ func TestConnectableFilter(t *testing.T) {
 		}
 	})
 
-	subs := stream.Subscribe(onNext).Connect()
-	<-subs
+	// subs := stream.Subscribe(onNext).Connect()
+	// <-subs
+	ctx := stream.Subscribe(onNext).Connect()
+	<-ctx.Done()
 
 	assert.Exactly(t, []int{1, 2, 3, 7}, nums)
 }
@@ -319,8 +333,10 @@ func TestConnectableScanWithIntegers(t *testing.T) {
 		}
 	})
 
-	subs := stream.Subscribe(onNext).Connect()
-	<-subs
+	// subs := stream.Subscribe(onNext).Connect()
+	// <-subs
+	ctx := stream.Subscribe(onNext).Connect()
+	<-ctx.Done()
 
 	assert.Exactly(t, []int{0, 1, 4, 9, 10, 18}, nums)
 }
@@ -355,8 +371,10 @@ func TestConnectableScanWithStrings(t *testing.T) {
 		}
 	})
 
-	subs := stream.Subscribe(onNext).Connect()
-	<-subs
+	// subs := stream.Subscribe(onNext).Connect()
+	// <-subs
+	ctx := stream.Subscribe(onNext).Connect()
+	<-ctx.Done()
 
 	expected := []string{
 		"hello",
@@ -386,8 +404,8 @@ func TestConnectableFirst(t *testing.T) {
 		}
 	})
 
-	subs := co2.Subscribe(onNext).Connect()
-	<-subs
+	ctx := co2.Subscribe(onNext).Connect()
+	<-ctx.Done()
 
 	assert.Exactly(t, []int{0}, nums)
 }
@@ -404,8 +422,8 @@ func TestConnectableFirstWithEmpty(t *testing.T) {
 		}
 	})
 
-	subs := co2.Subscribe(onNext).Connect()
-	<-subs
+	ctx := co2.Subscribe(onNext).Connect()
+	<-ctx.Done()
 
 	assert.Exactly(t, []int{}, nums)
 }
@@ -428,8 +446,8 @@ func TestObservableLast(t *testing.T) {
 		}
 	})
 
-	subs := co.Subscribe(onNext).Connect()
-	<-subs
+	ctx := co.Subscribe(onNext).Connect()
+	<-ctx.Done()
 
 	assert.Exactly(t, []int{3}, nums)
 }
@@ -446,8 +464,8 @@ func TestObservableLastWithEmpty(t *testing.T) {
 		}
 	})
 
-	subs := co.Subscribe(onNext).Connect()
-	<-subs
+	ctx := co.Subscribe(onNext).Connect()
+	<-ctx.Done()
 
 	assert.Exactly(t, []int{}, nums)
 }
@@ -474,8 +492,8 @@ func TestConnectableDistinct(t *testing.T) {
 		}
 	})
 
-	subs := co.Subscribe(onNext).Connect()
-	<-subs
+	ctx := co.Subscribe(onNext).Connect()
+	<-ctx.Done()
 
 	assert.Exactly(t, []int{1, 2, 3}, nums)
 }
@@ -502,8 +520,8 @@ func TestConnectableDistinctUntilChanged(t *testing.T) {
 		}
 	})
 
-	subs := co.Subscribe(onNext).Connect()
-	<-subs
+	ctx := co.Subscribe(onNext).Connect()
+	<-ctx.Done()
 
 	assert.Exactly(t, []int{1, 2, 1, 3}, nums)
 }

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/reactivex/rxgo/errors"
+	"github.com/reactivex/rxgo/fx"
 	"github.com/reactivex/rxgo/observer"
 	"github.com/reactivex/rxgo/rx"
 )
@@ -174,7 +175,7 @@ func (o Observable) Last() Observable {
 
 // Distinct merges duplicate items on the original Observable and
 // only emits distinct items on a new returning Observable.
-func (o Observable) Distinct(apply KeySelectFunc) Observable {
+func (o Observable) Distinct(apply fx.KeySelectFunc) Observable {
 	out := make(chan interface{})
 	go func() {
 		keysets := make(map[interface{}]struct{})
@@ -193,7 +194,7 @@ func (o Observable) Distinct(apply KeySelectFunc) Observable {
 
 // DistinctUntilChanged suppresses the subsequent duplicates on the
 // source Observable and only emits distinct items on a new returning Observable.
-func (o Observable) DistinctUntilChanged(apply KeySelectFunc) Observable {
+func (o Observable) DistinctUntilChanged(apply fx.KeySelectFunc) Observable {
 	out := make(chan interface{})
 	go func() {
 		var current interface{}
@@ -323,11 +324,11 @@ func Just(item interface{}, items ...interface{}) Observable {
 // Start creates an Observable from one or more directive EmitFunc
 // and emits the result of each operation asynchronously on a new
 // returning Observable.
-func Start(f EmitFunc, fs ...EmitFunc) Observable {
+func Start(f fx.EmitFunc, fs ...fx.EmitFunc) Observable {
 	if len(fs) > 0 {
-		fs = append([]EmitFunc{f}, fs...)
+		fs = append([]fx.EmitFunc{f}, fs...)
 	} else {
-		fs = []EmitFunc{f}
+		fs = []fx.EmitFunc{f}
 	}
 
 	source := make(chan interface{})
@@ -335,7 +336,7 @@ func Start(f EmitFunc, fs ...EmitFunc) Observable {
 	var wg sync.WaitGroup
 	for _, f := range fs {
 		wg.Add(1)
-		go func(f EmitFunc) {
+		go func(f fx.EmitFunc) {
 			source <- f()
 			wg.Done()
 		}(f)
@@ -376,7 +377,7 @@ func Merge(o1 rx.Observable, o2 rx.Observable, on ...rx.Observable) Observable {
 }
 
 // CombineLatest emits an item whenever any of the source Observables emits an item
-func CombineLatest(o []Observable, apply CombineFunc) Observable {
+func CombineLatest(o []Observable, apply fx.CombineFunc) Observable {
 	out := make(chan interface{})
 	go func() {
 		chans := o
