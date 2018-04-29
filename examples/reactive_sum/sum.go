@@ -30,7 +30,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/reactivex/rxgo/handlers"
 	"github.com/reactivex/rxgo/observable"
 )
 
@@ -45,7 +44,7 @@ func main() {
 	}
 
 	// All side effects are consolidated into this handler.
-	onNext := handlers.NextFunc(func(item interface{}) {
+	onNext := func(item interface{}) {
 		if text, ok := item.(string); ok {
 			switch {
 			case strings.HasPrefix(text, "a:"):
@@ -60,12 +59,12 @@ func main() {
 
 		fmt.Printf("Running sum: %d\n", num1+num2)
 
-	})
+	}
 
 	for {
 		fmt.Print("type> ")
 
-		sub := observable.Start(func() interface{} {
+		ctx := observable.Start(func() interface{} {
 			text, err := reader.ReadString('\n')
 			if err != nil {
 				return err
@@ -73,6 +72,6 @@ func main() {
 			return text
 		}).Subscribe(onNext)
 
-		<-sub
+		<-ctx.Done()
 	}
 }
